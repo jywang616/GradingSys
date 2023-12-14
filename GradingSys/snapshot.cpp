@@ -241,18 +241,20 @@ bool recovery() {
 				char buffer[Disk_Size];
 				char temp[BLOCK_SIZE];
 				memset(buffer, '\0', sizeof(buffer));
-				for (int i = 0; i < Disk_Size - BLOCK_SIZE; i += BLOCK_SIZE) {
+				int c_Addr = 0;
+				int num = Disk_Size / BLOCK_SIZE;
+				for (int i = 0; i < num; i ++) {
 					memset(temp, '\0', sizeof(temp));
-					fseek(bfr, i, SEEK_SET);
+					fseek(bfr, c_Addr, SEEK_SET);
 					fread(temp, BLOCK_SIZE, 1, bfr);
-					strcat(buffer, temp);
+					fflush(bfr);
+					fseek(fw, c_Addr, SEEK_SET);
+					fwrite(temp, sizeof(temp), 1, fw);
+					fflush(fw);
+					c_Addr += BLOCK_SIZE;
 				}
-				fflush(fr);
-
-				//写回原来的文件
-				fseek(fw, 0, SEEK_SET);
-				fwrite(buffer, sizeof(buffer), 1, fw);
-				fflush(fw);
+				
+				//fflush(fw);
 				break;
 			}
 			else {
