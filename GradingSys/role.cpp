@@ -14,8 +14,8 @@ bool add_users(char * namelist) {
 	}
 
 	char new_buff[1024]; memset(new_buff, '\0', 1024);
-//	sprintf(new_buff, "../../../%s", namelist);
-    sprintf(new_buff, "/Users/sprungissue/CLionProjects/GradingSys/GradingSys/%s", namelist);
+	sprintf(new_buff, "../../../%s", namelist);
+  //  sprintf(new_buff, "/Users/sprungissue/CLionProjects/GradingSys/GradingSys/%s", namelist);
 	int pro_cur_dir_addr = Cur_Dir_Addr;
 	char pro_cur_dir_name[310];
 	memset(pro_cur_dir_name, '\0', sizeof(pro_cur_dir_name));
@@ -47,10 +47,17 @@ bool add_users(char * namelist) {
 		//在其文件夹下创建对应课程文件夹
 
 		char dir_path[100];
-		sprintf(dir_path, "/home/%s/%s", relations[j].teacher, relations[j].lesson);
-		mkdir_func(Cur_Dir_Addr, dir_path);
-		sprintf(dir_path, "/home/%s/%s", relations[j].student, relations[j].lesson);
-		mkdir_func(Cur_Dir_Addr, dir_path);
+		memset(dir_path, '\0', sizeof(dir_path));
+		sprintf(dir_path, "/home/%s", relations[j].teacher);
+		cd_func(Cur_Dir_Addr, dir_path);
+		mkdir(Cur_Dir_Addr, relations[j].lesson);
+		chown(Cur_Dir_Addr, relations[j].lesson, relations[j].teacher, "teacher");
+
+		memset(dir_path, '\0', sizeof(dir_path));
+		sprintf(dir_path, "/home/%s", relations[j].student);
+		cd_func(Cur_Dir_Addr, dir_path);
+		mkdir(Cur_Dir_Addr, relations[j].lesson);
+		chown(Cur_Dir_Addr, relations[j].lesson, relations[j].student, "student");
 	}
 
 	//恢复现场
@@ -60,7 +67,7 @@ bool add_users(char * namelist) {
 	return true;
 }
 
-bool publish_task(char* lesson, char* filename) {//ok
+bool publish_task(char* lesson, char* filename) {//filename: XXX.txt
 	if (strcmp(Cur_Group_Name, "teacher") != 0) {
 		printf("Only teacher could publish tasks!\n");
 		return false;
@@ -75,7 +82,7 @@ bool publish_task(char* lesson, char* filename) {//ok
 	memset(buf, '\0', sizeof(buf));
     char new_buff[1024];
     memset(new_buff, '\0', 1024);
-    sprintf(new_buff, "/Users/sprungissue/CLionProjects/GradingSys/GradingSys/%s.txt", filename);
+    sprintf(new_buff, "../../../%s.txt", filename);
 	ifstream fin(new_buff);
 	if (!fin.is_open()) {
 		cout << "File Open Failure!" << endl;
@@ -97,7 +104,7 @@ bool publish_task(char* lesson, char* filename) {//ok
     //恢复现场
     Cur_Dir_Addr = pro_cur_dir_addr;
     strcpy(Cur_Dir_Name, pro_cur_dir_name);
-    char ms[] = "Successfully published task!\n";
+    printf( "Successfully published task!\n");
 
 	return true;
 }
@@ -117,7 +124,7 @@ bool judge_hw(char* namelist, char* lesson, char* hwname) {
 //	*p = '\0';
     char new_buff[100];
     memset(new_buff, '\0', 100);
-    sprintf(new_buff, "/Users/sprungissue/CLionProjects/GradingSys/GradingSys/%s", namelist);
+    sprintf(new_buff, "../../../%s", namelist);
 	ifstream fin(new_buff);
 	if (!fin.is_open()) {
 		cout << "File Open Failed!" << endl;
@@ -185,7 +192,7 @@ bool check_hw_content(char* lesson, char* hwname)
 	cd(Cur_Dir_Addr, "home");
     char new_buff[1024];
     memset(new_buff, '\0', 1024);
-    sprintf(new_buff, "/Users/sprungissue/CLionProjects/GradingSys/GradingSys/%s", STUDENT_COURSE_LIST);
+    sprintf(new_buff, "../../../%s", STUDENT_COURSE_LIST);
     ifstream fin(new_buff);
     if (!fin.is_open()) {
         cout << "File Open Failed!" << endl;
@@ -245,7 +252,7 @@ bool check_hw_score(char* lesson, char* hwname)
     cd(Cur_Dir_Addr, "home");
     char new_buff[1024];
     memset(new_buff, '\0', 1024);
-    sprintf(new_buff, "/Users/sprungissue/CLionProjects/GradingSys/GradingSys/%s", STUDENT_COURSE_LIST);
+    sprintf(new_buff, "../../../%s", STUDENT_COURSE_LIST);
     ifstream fin(new_buff);
     if (!fin.is_open()) {
         cout << "File Open Failed!" << endl;
@@ -334,7 +341,7 @@ bool submit_assignment(char* student_name, char* lesson, char* filename)
 	memset(buf, '\0', sizeof(buf));
     char new_buff[100];
     memset(new_buff, '\0', 100);
-    sprintf(new_buff, "/Users/sprungissue/CLionProjects/GradingSys/GradingSys/%s.txt", filename);
+    sprintf(new_buff, "../../../%s.txt", filename);
 	ifstream fin(new_buff);
 	if (!fin.is_open()) {
 		char ms[] = "Cannot open file!\n";
@@ -346,7 +353,6 @@ bool submit_assignment(char* student_name, char* lesson, char* filename)
 	while (getline(fin, line)) {
 		strcat(buf, line.c_str());
 	}
-
 	char dir_path[100];
 	sprintf(dir_path, "/home/%s/%s/%s_%s", Cur_User_Name, lesson, filename, Cur_User_Name);
 	echo_func(Cur_Dir_Addr, dir_path, ">", buf);

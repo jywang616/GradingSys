@@ -17,3 +17,5 @@ bool echo_func(int CurAddr, char* str, char* s_type, char* buf);
 bool chmod_func(int CurAddr, char* pmode, char* str);
 bool chown_func(int CurAddr, char* u_g, char* str);
 bool passwd_func(char* username);
+void stu_help();
+void tea_help();

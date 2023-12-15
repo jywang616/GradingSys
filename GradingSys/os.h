@@ -8,11 +8,14 @@
 
 #define BLOCK_SIZE 512	//一个块大小 512 Byte
 #define INODE_SIZE 128  //一个inode entry的大小是128Byte
+#define FCACHE_SIZE 512	//一级缓存块大小 512Byte
 #define DirItem_Size 16 //一个块最多能装16个DirItem
 #define FILE_NAME_MAX_SIZE	28	//文件名最长28Byte
+#define FIRST_CACHE_BLOCK_SIZE 128 //一个一级缓存块存128个块地址
 
 #define BLOCK_NUM 10240		//10240个block
 #define INODE_NUM 1024	//一个inode可以存10个block->要用1024个inode存信息
+#define FCACHE_NUM 1024 //1024个一级缓存块
 
 #define MODE_DIR 01000	//目录标识（八进制）: 001 000 000 000
 #define MODE_FILE 00000	//文件标识（八进制）: 000 000 000 000
@@ -29,27 +32,32 @@
 #define FILE_DEF_PERMISSION 0664			//文件默认权限 owner,group:读写 other:读 
 #define DIR_DEF_PERMISSION	0755			//目录默认权限 owner：全部 group,other:读执行
 
-#define GRADE_SYS_NAME "grading_sys.txt"	//文件系统名
+#define GRADE_SYS_NAME "grading_sys.sys"	//文件系统名
 #define STUDENT_COURSE_LIST "Student_Course_Selection.txt" //学生选课名单（name:lesson:teacher)
 
 
 struct SuperBlock {
 	unsigned short s_INODE_NUM;				//inode节点数，最多 65535
 	unsigned int s_BLOCK_NUM;				//磁盘块块数，最多 4294967294
+	unsigned int s_FCACHE_NUM;				//一级块节点数
 
 	unsigned short s_free_INODE_NUM;		//空闲inode节点数
 	unsigned int s_free_BLOCK_NUM;			//空闲磁盘块数
+	unsigned int s_free_FCACHE_NUM;			//空闲一级块数
 
 	unsigned short s_BLOCK_SIZE;			//磁盘块大小
 	unsigned short s_INODE_SIZE;			//inode大小
+	unsigned short s_FCACHE_SIZE;			//一级块大小
 	unsigned short s_SUPERBLOCK_SIZE;		//超级块大小
-	
+
 	//磁盘分布
 	int s_Superblock_Start_Addr;
 	int s_InodeBitmap_Start_Addr;
 	int s_BlockBitmap_Start_Addr;
+	int s_FCacheBitmap_Start_Addr;
 	int s_Inode_Start_Addr;
 	int s_Block_Start_Addr;
+	int s_FCache_Start_Addr;
 };
 
 struct inode {		//不要动此处变量，刚好128B
@@ -76,12 +84,19 @@ struct DirItem {							//一个item是32Byte，一个block可以装16个item
 	int inodeAddr;							//目录项对应的inode节点地址
 };
 
+//一级缓存
+struct FCache {
+	int baddr[FIRST_CACHE_BLOCK_SIZE];	//128*4=512B
+};
+
 extern SuperBlock* superblock;
 extern const int Superblock_Start_Addr;		//超级块偏移地址,占一个block
 extern const int InodeBitmap_Start_Addr;		//inode位图 偏移地址，占两个磁盘块，最多监控1024个inode的状态
 extern const int BlockBitmap_Start_Addr;		//block位图 偏移地址，占二十个磁盘块，最多监控 10240 个磁盘块（5120KB）的状态
+extern const int FCacheBitmap_Start_Addr;		//FCache位图 偏移地址，占两个磁盘块，最多监控1024个FCache
 extern const int Inode_Start_Addr;			//inode节点区 偏移地址，占 INODE_NUM/(BLOCK_SIZE/INODE_SIZE) 个磁盘块
 extern const int Block_Start_Addr;			//block数据区 偏移地址 ，占 INODE_NUM 个磁盘块
+extern const int FCache_Start_Addr;			//FCache数据区 偏移地址，占FCache_NUM个磁盘块
 extern const int Modified_inodeBitmap_Start_Addr;		//逻辑转储
 extern const int File_Max_Size;				//单个文件最大大小
 extern const int Disk_Size;					//虚拟磁盘文件大小
@@ -107,11 +122,9 @@ extern SuperBlock* superblock;				//超级块指针
 extern bool inode_bitmap[INODE_NUM];		//inode位图
 extern bool block_bitmap[BLOCK_NUM];		//磁盘块位图
 extern bool modified_inode_bitmap[INODE_NUM];
+extern bool fcache_bitmap[FCACHE_NUM];
 
 extern char buffer[10000000];				//10M，缓存整个虚拟磁盘文件
-
-
-
 
 
 //大类函数
@@ -129,13 +142,15 @@ void gotoRoot();
 void ls(char str[]);
 
 bool cat(int PIAddr, char name[]);
-bool chown(int PIAddr, char* pmode, char name[], char group[]);
+bool chown(int PIAddr, char* filename, char name[], char group[]);
 
 //工具函数
 int ialloc();
 void ifree(int iaddr);
 int balloc();
 void bfree(int baddr);
+int fcache_alloc();
+void fcfree(int fcaddr);
 bool recursive_rmdir(int CHIAddr, char name[]);
 bool recursive_rmfile(int CHIAddr, char name[]);
 

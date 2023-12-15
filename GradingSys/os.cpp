@@ -18,16 +18,21 @@ bool Format() { //ok
 
 	superblock->s_INODE_NUM = INODE_NUM;
 	superblock->s_BLOCK_NUM = BLOCK_NUM;
+	superblock->s_FCACHE_NUM = FCACHE_NUM;
 	superblock->s_free_INODE_NUM = INODE_NUM;
 	superblock->s_free_BLOCK_NUM = BLOCK_NUM;
+	superblock->s_free_FCACHE_NUM = FCACHE_NUM;
 	superblock->s_BLOCK_SIZE = BLOCK_SIZE;
 	superblock->s_INODE_SIZE = INODE_SIZE;
+	superblock->s_FCACHE_SIZE = BLOCK_SIZE;
 	superblock->s_SUPERBLOCK_SIZE = sizeof(SuperBlock);
 	superblock->s_Superblock_Start_Addr = Superblock_Start_Addr;
 	superblock->s_InodeBitmap_Start_Addr = InodeBitmap_Start_Addr;
 	superblock->s_BlockBitmap_Start_Addr = BlockBitmap_Start_Addr;
+	superblock->s_FCacheBitmap_Start_Addr = FCacheBitmap_Start_Addr;
 	superblock->s_Inode_Start_Addr = Inode_Start_Addr;
 	superblock->s_Block_Start_Addr = Block_Start_Addr;
+	superblock->s_FCache_Start_Addr = FCache_Start_Addr;
 	fseek(fw, Superblock_Start_Addr, SEEK_SET);
 	fwrite(superblock, sizeof(SuperBlock), 1, fw);
 
@@ -44,6 +49,10 @@ bool Format() { //ok
 	fwrite(modified_inode_bitmap, sizeof(modified_inode_bitmap), 1, fw);
 	//inode和block板块暂时不需要内容
 	fflush(fw);//将上面内容放入fw中
+
+	memset(fcache_bitmap, 0, sizeof(fcache_bitmap));
+	fseek(fw, FCacheBitmap_Start_Addr, SEEK_SET);
+	fwrite(fcache_bitmap, sizeof(fcache_bitmap), 1, fw);
 
 	//创建根目录
 	int iaddr = ialloc();
@@ -493,7 +502,7 @@ bool recursive_rmdir(int CHIAddr, char name[]) {//删除当前目录(父亲block
 		mode = 6;
 	}
 	//没有该权限并且不为管理员
-	if ((((ino.inode_mode >> mode >> 1) & 1) == 0) && (strcmp(Cur_Group_Name, "root") != 0)) {//是否可写：2
+	if ((((ino.inode_mode >> mode >> 1) & 1) == 0) || (strcmp(Cur_Group_Name, "root") != 0)) {//是否可写：2
 		printf("没有权限删除该文件夹\n");
 		return false;
 	}
@@ -654,9 +663,9 @@ bool echo(int PIAddr, char name[], int type, char* buf) {	//文件新增or重写
 	}
 }
 bool writefile(inode fileinode, int iaddr, char buf[]) { //文件写入
-
 	int new_block = strlen(buf) / BLOCK_SIZE + 1;
-	for (int i = 0; i < new_block; ++i) {
+
+	for (int i = 0; i < new_block % 11; ++i) {
 		int baddr = fileinode.i_dirBlock[i];
 		if (baddr == -1) {
 			baddr = balloc();
@@ -664,7 +673,14 @@ bool writefile(inode fileinode, int iaddr, char buf[]) { //文件写入
 		char temp_file[BLOCK_SIZE];
 		memset(temp_file, '\0', BLOCK_SIZE);
 		if (i == new_block - 1) {
-			strcpy(temp_file, buf + BLOCK_SIZE * i);//buf+blocksize*i-->buf+blocksize*i+1
+			if (strlen(buf + BLOCK_SIZE * i) < BLOCK_SIZE) {
+				//buf+blocksize*i-->buf+blocksize*i+1
+				strcpy(temp_file, buf + BLOCK_SIZE * i);
+			}
+			else {
+				strncpy(temp_file, buf + BLOCK_SIZE * i, BLOCK_SIZE);
+			}
+
 		}
 		else {
 			strncpy(temp_file, buf + BLOCK_SIZE * i, BLOCK_SIZE);
@@ -672,9 +688,33 @@ bool writefile(inode fileinode, int iaddr, char buf[]) { //文件写入
 
 		fseek(fw, baddr, SEEK_SET);
 		fwrite(temp_file, BLOCK_SIZE, 1, fw);
-
 		fileinode.i_dirBlock[i] = baddr;
 	}
+
+	//开一级缓存
+	if (strlen(buf) > 10 * BLOCK_SIZE) {
+		new_block -= 10;
+		FCache fcache;
+		fseek(fr, fileinode.i_indirect_1, SEEK_SET);
+		fread(&fcache, sizeof(fcache), 1, fr);
+		int count = 0;
+		for (int i = 0; i < FIRST_CACHE_BLOCK_SIZE; ++i) {
+			if ((fcache.baddr[i] == -1) && (new_block >= 0)) {
+				fcache.baddr[i] = fcache_alloc();
+
+				char temp_file[BLOCK_SIZE];
+				memset(temp_file, '\0', BLOCK_SIZE);
+				strncpy(temp_file, buf + BLOCK_SIZE * (10 + count), BLOCK_SIZE);
+
+				fseek(fr, fcache.baddr[i], SEEK_SET);
+				fwrite(temp_file, sizeof(temp_file), 1, fw);
+
+				count++;
+				new_block--;
+			}
+		}
+	}
+
 	fileinode.inode_file_size = strlen(buf);
 	time(&fileinode.inode_change_time);
 	time(&fileinode.file_modified_time);
@@ -682,6 +722,7 @@ bool writefile(inode fileinode, int iaddr, char buf[]) { //文件写入
 	fwrite(&fileinode, sizeof(fileinode), 1, fw);
 	return true;
 }
+
 bool addfile(inode fileinode, int iaddr, char buf[]) { //文件续写ok
 	//前提：假设是按照block顺序存储
 	if ((fileinode.inode_file_size + strlen(buf)) > 10 * BLOCK_SIZE) {
@@ -965,7 +1006,46 @@ void bfree(int baddr) {
 	fseek(fw, Superblock_Start_Addr, SEEK_SET);
 	fwrite(superblock, sizeof(superblock), 1, fw);
 }
-
+int fcache_alloc() {
+	//1 cache + 1 ditem
+	int baddr = -1;
+	int index = -1;
+	for (int i = 0; i < FCACHE_NUM; i++) {
+		if (fcache_bitmap[i] == 0) {
+			index = i;
+			fcache_bitmap[i] = 1;
+			break;
+		}
+	}
+	if (index == -1) {
+		printf("没有cache空间\n");
+		return -1;
+	}
+	baddr = FCache_Start_Addr + index * FCACHE_SIZE;
+	superblock->s_free_FCACHE_NUM -= 1;
+	fseek(fw, Superblock_Start_Addr, SEEK_SET);
+	fwrite(superblock, sizeof(superblock), 1, fw);
+	fseek(fw, FCacheBitmap_Start_Addr, SEEK_SET);
+	fwrite(fcache_bitmap, sizeof(fcache_bitmap), 1, fw);
+	return baddr;
+}
+void fcfree(int fcaddr) {
+	if ((fcaddr % FCACHE_SIZE) != 0) {
+		printf("当前cache位置错误\n");
+		return;
+	}
+	int index = (fcaddr - FCache_Start_Addr) / FCACHE_SIZE;
+	if (fcache_bitmap[index] == 0) {
+		printf("未使用当前cache，无需释放\n");
+		return;
+	}
+	fcache_bitmap[index] = 0;
+	fseek(fw, FCacheBitmap_Start_Addr, SEEK_SET);
+	fwrite(fcache_bitmap, sizeof(fcache_bitmap), 1, fw);
+	superblock->s_free_FCACHE_NUM -= 1;
+	fseek(fw, Superblock_Start_Addr, SEEK_SET);
+	fwrite(superblock, sizeof(superblock), 1, fw);
+}
 //****用户&用户组函数****
 void inUsername(char* username)	//输入用户名
 {
@@ -992,7 +1072,7 @@ bool login()	//登陆界面
 	char passwd[100] = { 0 };
 	inUsername(username);	//输入用户名
 	inPasswd(passwd);		//输入用户密码
-    printf("input password: %s, input username: %s\n", passwd, username);
+    //printf("input password: %s, input username: %s\n", passwd, username);
 	if (check(username, passwd)) {			//核对用户名和密码
 
 		isLogin = true;
@@ -1094,7 +1174,7 @@ bool useradd(char username[], char passwd[], char group[]) {	//用户注册
 	}
 	//buf[strlen(buf)] = '\0'; (strcat可能会自动添加？）
 	if (strstr(buf, username)!= NULL) {
-		printf("该用户名已存在\n");
+		//printf("该用户名已存在\n");
 		return false;
 	}
 	sprintf(buf + strlen(buf), "%s:%d:%d\n", username, nextUID++, g);
@@ -1387,7 +1467,7 @@ bool check(char username[], char passwd[]) {//核验身份登录&设置 ok
 		p++;
 	}
 	if (strcmp(checkpw, passwd) != 0) {
-        printf("Here!!! checkpw is %s, passwd is %s\n", checkpw, passwd);
+        //printf("Here!!! checkpw is %s, passwd is %s\n", checkpw, passwd);
 		printf("密码不正确，请重新尝试！\n");
 		return false;
 	}
@@ -1951,7 +2031,7 @@ bool chown(int PIAddr,char* filename, char name[], char group[]) {//修改文件
 			}
 		}
 	}
-	printf("没有找到该文件，无法修改权限\n");
+	//printf("没有找到该文件，无法修改权限\n");
 	return false;
 }
 bool passwd(char username[],char pwd[]) {
